@@ -1,0 +1,26 @@
+{
+  "state_encrypt_pass": "thay_bang_mat_khau_cua_ban",
+  "monitors": [
+    {
+      "type": "git",
+      "track_type": "release",
+      "source": "https://github.com/openchamber/openchamber.git",
+      "target_space": "zedc78/openchamber",
+      "hf_token": "hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    {
+      "type": "docker",
+      "source": "vinhnd2/my-app:latest",
+      "target_space": "vinhnd2/my-space-docker",
+      "hf_token": "hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    {
+      "type": "git",
+      "track_type": "commit",
+      "branch": "main",
+      "source": "https://gitlab.com/your-private-repo/tool.git",
+      "target_space": "your-org/tool-space",
+      "hf_token": "hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    }
+  ]
+}
