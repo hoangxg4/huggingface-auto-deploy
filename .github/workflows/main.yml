@@ -1,0 +1,38 @@
+name: Global Auto-Update Logic
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+
+jobs:
+  run-sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install regctl
+        run: |
+          curl -L -s https://github.com/regclient/regclient/releases/latest/download/regctl-linux-amd64 > regctl
+          chmod +x regctl
+          sudo mv regctl /usr/local/bin/
+
+      - name: Execution
+        env:
+          CONFIG_REPO_PAT: ${{ secrets.MY_GITHUB_PAT }}
+          CONFIG_RAW_URL: ${{ secrets.CONFIG_RAW_URL }}
+        run: bash check_and_deploy.sh
+
+      - name: Save Versions
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          if [[ -n $(git status --porcelain apps_state.json.enc) ]]; then
+            git add apps_state.json.enc
+            git commit -m "chore: sync versions [skip ci]"
+            git push
+          fi
