@@ -1,41 +1,42 @@
 #!/bin/bash
-
-# Ẩn hoàn toàn các lệnh thực thi để bảo mật
 set +x
 
-# 1. Tải cấu hình từ URL bí mật
-# Sử dụng -s để chạy chế độ im lặng (silent)
+# 1. Tải cấu hình
 curl -s -H "Authorization: token $CONFIG_REPO_PAT" -L "$CONFIG_RAW_URL" -o config.json
 
-if [ ! -f config.json ]; then
+# KIỂM TRA HỢP LỆ JSON TRƯỚC KHI CHẠY
+if ! jq '.' config.json > /dev/null 2>&1; then
+    echo "❌ Lỗi: File config.json không đúng định dạng JSON (sai cú pháp)."
     exit 1
 fi
 
-# 2. Lấy pass mã hóa và thiết lập state
-PWD_STATE=$(jq -r '.state_encrypt_pass' config.json)
+PWD_STATE=$(jq -r '.state_encrypt_pass // empty' config.json)
+[ -n "$PWD_STATE" ] && echo "::add-mask::$PWD_STATE"
+
 STATE_FILE="apps_state.json"
 STATE_FILE_ENC="apps_state.json.enc"
 
-# Mask mật khẩu mã hóa khỏi log
-echo "::add-mask::$PWD_STATE"
-
-if [ -f "$STATE_FILE_ENC" ]; then
+if [ -f "$STATE_FILE_ENC" ] && [ -n "$PWD_STATE" ]; then
     openssl enc -aes-256-cbc -d -pbkdf2 -iter 100000 -in "$STATE_FILE_ENC" -out "$STATE_FILE" -k "$PWD_STATE" 2>/dev/null
 fi
 [ ! -f "$STATE_FILE" ] && echo "{}" > "$STATE_FILE"
 
-# 3. Duyệt danh sách monitors
+# 3. Duyệt danh sách
+# Thêm kiểm tra hf_token rỗng để tránh lỗi Warning mask
 jq -c '.monitors[]' config.json | while read -r item; do
-    source=$(echo "$item" | jq -r '.source')
-    target=$(echo "$item" | jq -r '.target_space')
+    source=$(echo "$item" | jq -r '.source // empty')
+    target=$(echo "$item" | jq -r '.target_space // empty')
+    hf_token=$(echo "$item" | jq -r '.hf_token // empty')
+
+    # Chỉ add mask nếu giá trị không rỗng
+    [ -n "$hf_token" ] && echo "::add-mask::$hf_token"
+    [ -n "$source" ] && echo "::add-mask::$source"
+
+    # ... (giữ nguyên phần logic check version và curl trigger) ...
+    # Lưu ý: Nhớ dùng biến $source, $target, $hf_token đã lấy ở trên
+    
     type=$(echo "$item" | jq -r '.type')
     track_type=$(echo "$item" | jq -r '.track_type // "commit"')
-    hf_token=$(echo "$item" | jq -r '.hf_token')
-
-    # Mask Token Hugging Face và Source nhạy cảm
-    echo "::add-mask::$hf_token"
-    echo "::add-mask::$source"
-
     current_ver=""
 
     if [ "$type" == "docker" ]; then
@@ -55,7 +56,6 @@ jq -c '.monitors[]' config.json | while read -r item; do
     old_ver=$(jq -r ".[\"$key\"] // empty" "$STATE_FILE")
 
     if [ "$current_ver" != "$old_ver" ]; then
-        # Trigger Hugging Face API
         status=$(curl -s -o /dev/null -w "%{http_code}" \
             -X POST \
             -H "Authorization: Bearer $hf_token" \
@@ -69,10 +69,10 @@ jq -c '.monitors[]' config.json | while read -r item; do
     fi
 done
 
-# 4. Mã hóa và dọn dẹp
-if [ -f .update_detected ]; then
+# 4. Mã hóa lại
+if [ -f .update_detected ] && [ -n "$PWD_STATE" ]; then
     openssl enc -aes-256-cbc -salt -pbkdf2 -iter 100000 -in "$STATE_FILE" -out "$STATE_FILE_ENC" -k "$PWD_STATE"
     rm "$STATE_FILE" .update_detected
 fi
-rm config.json
+rm -f config.json
 echo "✅ Quá trình kiểm tra hoàn tất."
