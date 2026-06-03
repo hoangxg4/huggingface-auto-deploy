@@ -15,7 +15,7 @@ echo "✅ [DEBUG] Cấu hình hợp lệ."
 PWD_STATE=$(jq -r '.state_encrypt_pass // empty' config.json)
 [ -n "$PWD_STATE" ] && echo "::add-mask::$PWD_STATE"
 
-# Thu thập và mask tất cả hf_token và source trước để tránh lỗi luồng read
+# Thu thập và mask tất cả hf_token và source trước để tránh lỗi luồng read của vòng lặp sau
 jq -r '.monitors[].hf_token // empty' config.json | while read -r tok; do [ -n "$tok" ] && echo "::add-mask::$tok"; done
 jq -r '.monitors[].source // empty' config.json | while read -r src; do [ -n "$src" ] && echo "::add-mask::$src"; done
 
@@ -36,7 +36,7 @@ echo "📊 [DEBUG] Trạng thái hiện tại đang lưu trữ:"
 cat "$STATE_FILE"
 echo -e "\n--------------------------------------------------"
 
-# 3. Duyệt danh sách
+# 3. Duyệt danh sách các ứng dụng cần theo dõi
 jq -c '.monitors[]' config.json | while read -r item; do
     source=$(echo "$item" | jq -r '.source // empty')
     target=$(echo "$item" | jq -r '.target_space // empty')
@@ -53,7 +53,8 @@ jq -c '.monitors[]' config.json | while read -r item; do
     elif [ "$type" == "git" ]; then
         if [ "$track_type" == "release" ]; then
             echo "   [DEBUG] Loại Git (Release). Đang check tag từ: $source"
-            current_ver=$(git ls-remote --tags "$source" | cut -d/ -f3 | grep -v "\^{}" | tail -n1)
+            # FIX: Thêm "sort -V" để sắp xếp phiên bản đúng chuẩn v1.9.9 -> v1.12.0
+            current_ver=$(git ls-remote --tags "$source" | cut -d/ -f3 | grep -v "\^{}" | sort -V | tail -n1)
         else
             branch=$(echo "$item" | jq -r '.branch // "HEAD"')
             echo "   [DEBUG] Loại Git (Commit). Nhánh: $branch. Đang check SHA từ: $source"
@@ -73,9 +74,9 @@ jq -c '.monitors[]' config.json | while read -r item; do
     echo "   [DEBUG] Phiên bản LOCAL đang lưu:   '${old_ver:-Chưa có dữ liệu}'"
 
     if [ "$current_ver" != "$old_ver" ]; then
-        echo "   🚀 [UPDATE DETECTED] Phát hiện có phiên bản mới! Đang gửi lệnh Trigger tới Hugging Face..."
+        echo "   🚀 [UPDATE DETECTED] Phát hiện có phiên bản mới! Đang gửi lệnh hành động tới Hugging Face..."
         
-        # Tạo file tạm hứng Response Body từ Hugging Face
+        # Tạo file tạm hứng Response Body từ Hugging Face để debug thực tế
         res_body=$(mktemp)
         
         status=$(curl -s -o "$res_body" -w "%{http_code}" \
@@ -84,15 +85,15 @@ jq -c '.monitors[]' config.json | while read -r item; do
             "https://huggingface.co/api/spaces/$target/restart?factory=true")
 
         echo "   [DEBUG] Hugging Face API trả về HTTP Code: $status"
-        echo "   [DEBUG] Chi tiết phản hồi (Response): $(cat "$res_body")"
+        echo "   [DEBUG] Chi tiết phản hồi (Response Body): $(cat "$res_body")"
 
         if [ "$status" == "200" ]; then
             tmp=$(mktemp)
             jq ".[\"$key\"] = \"$current_ver\"" "$STATE_FILE" > "$tmp" && mv "$tmp" "$STATE_FILE"
             echo "1" > .update_detected
-            echo "   ✅ [SUCCESS] Đã ghi nhận update thành công cho $target vào file trạng thái."
+            echo "   ✅ [SUCCESS] Đã ghi nhận bản cập nhật mới thành công cho $target vào file trạng thái."
         else
-            echo "   ❌ [ERROR] Gọi API thất bại. Không cập nhật trạng thái lưu trữ."
+            echo "   ❌ [ERROR] Gọi API thất bại hoặc Token sai. Không cập nhật trạng thái lưu trữ."
         fi
         rm -f "$res_body"
     else
@@ -101,14 +102,14 @@ jq -c '.monitors[]' config.json | while read -r item; do
     echo "--------------------------------------------------"
 done
 
-# 4. Mã hóa lại
+# 4. Mã hóa lại file trạng thái nếu phát hiện có sự thay đổi
 if [ -f .update_detected ] && [ -n "$PWD_STATE" ]; then
     echo "🔹 [DEBUG] Phát hiện có sự thay đổi phiên bản. Tiến hành mã hóa lại file trạng thái..."
     openssl enc -aes-256-cbc -salt -pbkdf2 -iter 100000 -in "$STATE_FILE" -out "$STATE_FILE_ENC" -k "$PWD_STATE"
     rm "$STATE_FILE" .update_detected
     echo "✅ [DEBUG] Đã mã hóa xong."
 else
-    echo "🔹 [DEBUG] Không có thay đổi nào được ghi nhận. Không cần mã hóa lại."
+    echo "🔹 [DEBUG] Không có thay đổi thực tế nào được ghi nhận. Giữ nguyên trạng thái cũ."
     rm -f "$STATE_FILE"
 fi
 
