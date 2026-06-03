@@ -2,14 +2,14 @@ name: Global Auto-Update Logic
 
 on:
   schedule:
-    - cron: '0 * * * *'
-  workflow_dispatch:
+    - cron: '0 * * * *' # Chạy tự động mỗi giờ một lần
+  workflow_dispatch:   # Cho phép kích hoạt thủ công bằng nút bấm công cụ
 
 jobs:
   run-sync:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write  # Cấp quyền ghi để push cập nhật vào repository
 
     steps:
       - name: Checkout
@@ -33,6 +33,8 @@ jobs:
           git config --local user.name "GitHub Action"
           if [[ -n $(git status --porcelain apps_state.json.enc) ]]; then
             git add apps_state.json.enc
+            # Pull đồng bộ trước khi push phòng trường hợp có xung đột giữa các luồng chạy
+            git pull --rebase origin main || echo "Không có gì để rebase"
             git commit -m "chore: sync versions [skip ci]"
             git push
           fi
